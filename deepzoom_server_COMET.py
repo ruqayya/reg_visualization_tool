@@ -1,5 +1,4 @@
 import scipy.io as sio
-
 from flask import Flask, abort, make_response, render_template, url_for, request, jsonify
 from io import BytesIO
 import openslide
@@ -10,14 +9,13 @@ import re
 from unicodedata import normalize
 import cv2
 from PIL import Image
-import matplotlib.pyplot as plt
 import numpy as np
 from numpy.linalg import inv
-from math import floor, ceil
+from numpy.fft import fft2
 from skimage.color import rgb2hed
 from skimage.exposure import rescale_intensity
-from numpy.fft import fft2
 from skimage.measure import label, regionprops
+import os
 
 DEEPZOOM_SLIDE = None
 DEEPZOOM_FORMAT = 'jpeg'
@@ -140,15 +138,18 @@ class LocalRegistration:
 		translation = np.float32([[1, 0, -offset[1]], [0, 1, -offset[0]], [0,0,1]])
 		return translation
 
+
 app = Flask(__name__)
 app.config.from_object(__name__)
 app.config.from_envvar('DEEPZOOM_TILER_SETTINGS', silent=True)
 localRegObj = LocalRegistration()
 
+
 class PILBytesIO(BytesIO):
     def fileno(self):
         '''Classic PIL doesn't understand io.UnsupportedOperation.'''
         raise AttributeError('Not supported')
+
 
 @app.before_first_request
 def load_slide():
@@ -177,6 +178,7 @@ def load_slide():
         app.slide_mpp = (float(mpp_x) + float(mpp_y)) / 2
     except (KeyError, ValueError):
         app.slide_mpp = 0
+
 
 @app.route('/localReg', methods=['GET', 'POST'])
 def localRegFtn():
@@ -250,6 +252,7 @@ def index():
     slide_url2 = url_for('dzi', slug=DUPLICATE_TARGET_SLIDE_NAME)
     return render_template('slide-multipane.html', slide_url1=slide_url1, slide_url2=slide_url2, slide_mpp=app.slide_mpp)
 
+
 @app.route('/<slug>.dzi')
 def dzi(slug):
     format = app.config['DEEPZOOM_FORMAT']
@@ -286,6 +289,7 @@ def tile(slug, level, col, row, format):
     resp.mimetype = 'image/%s' % format
     return resp
 
+
 def get_transformed_tile(level, target_tile_address, isLocal = 1):
     # target_tile = Image.new('RGB', (DEEPZOOM_TILE_SIZE, DEEPZOOM_TILE_SIZE))
     # target_tile.paste(app.slides['slide1'].get_tile(level, target_tile_address), (1,1))
@@ -306,7 +310,7 @@ def get_transformed_tile(level, target_tile_address, isLocal = 1):
     target_centre = np.expand_dims(target_centre, axis=0)
     inv_transform_matrix = inv(level_transform)
     source_centre = transform_points(target_centre, inv_transform_matrix)[0]
-    source_tile_address = [floor(x/tileSize) for x in source_centre]
+    source_tile_address = [np.floor(x/tileSize) for x in source_centre]
     source_tile_coor = np.array(source_tile_address) * tileSize
 
     xTiles, yTiles = [-1, 0, 1], [-1, 0, 1]
@@ -346,11 +350,12 @@ def get_transformed_tile(level, target_tile_address, isLocal = 1):
     tempT = np.matmul(np.matmul(np.matmul(Translation, tempT), Translation_), translateT)
     transform_image = cv2.warpAffine(np.array(image), tempT[0:-1][:], image.size[:2])
     image_centre = (int(tileSize*1.5), int(tileSize*1.5))
-    temp = transform_image[image_centre[1] - floor(transformSize[1] / 2):image_centre[1] + ceil(transformSize[1] / 2),
-           image_centre[0] - floor(transformSize[0] / 2):image_centre[0] + ceil(transformSize[0] / 2), :]
+    temp = transform_image[image_centre[1] - np.floor(transformSize[1] / 2).astype(int):image_centre[1] + np.ceil(transformSize[1] / 2).astype(int),
+           image_centre[0] - np.floor(transformSize[0] / 2).astype(int):image_centre[0] + np.ceil(transformSize[0] / 2).astype(int), :]
 
     image = Image.fromarray(temp)
     return image
+
 
 def transform_points(points, matrix):
     """ transform points according to given transformation matrix
@@ -365,9 +370,11 @@ def transform_points(points, matrix):
     points_warp = np.dot(pts_pad, matrix.T)
     return points_warp[:, :-1]
 
+
 def slugify(text):
     text = normalize('NFKD', text.lower()).encode('ascii', 'ignore').decode()
     return re.sub('[^a-z0-9]+', '-', text)
+
 
 if __name__ == '__main__':
     parser = OptionParser(usage='Usage: %prog [options] [slide]')
@@ -411,21 +418,16 @@ if __name__ == '__main__':
 
     # Set slide file
     try:
-        # app.config['DEEPZOOM_TARGET_SLIDE'] = args[0]
-        # app.config['DEEPZOOM_SOURCE_SLIDE'] = args[1]
-        app.config['DEEPZOOM_TARGET_SLIDE'] = "Histology_WSIs\\06-18270_5_A1CK818_2.tif"
-        app.config['DEEPZOOM_SOURCE_SLIDE'] = "Histology_WSIs\\06-18270_5_A1MLH1_1.tif"
+        app.config['DEEPZOOM_TARGET_SLIDE'] = args[0]
+        app.config['DEEPZOOM_SOURCE_SLIDE'] = args[1]
 
     except IndexError:
         if app.config['DEEPZOOM_TARGET_SLIDE'] is None or app.config['DEEPZOOM_SOURCE_SLIDE'] is None:
             parser.error('Please provide both target and source slides!')
     try:
-        # transform_path = args[2]
-        transform_path = "Histology_WSIs\\06-18270_5&PAIR_CK818_2_AND_MLH1_WARPED_1.mat"
-        mat_contents = sio.loadmat(transform_path)
-        transform = mat_contents['transform']
-        transform_level = 7
-        app.config['TRANSFORM_MATRIX'] = transform * [[1, 1, 2 ** transform_level], [1, 1, 2 ** transform_level], [0, 0, 1]]  # at level0
+        transform_path = args[2]
+        app.config['TRANSFORM_MATRIX'] = np.load(transform_path)
+
     except IndexError:
         parser.error('The given transform file is not in a correct format!')
 
