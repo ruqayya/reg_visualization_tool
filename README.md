@@ -52,7 +52,7 @@ In [data folder](https://github.com/ruqayya/reg_visualization_tool/tree/main/dat
 ```sh
     reg_vis_tool_env\Scripts\activate 
 ```
-6. 
+6. To visualize a registered pair of images, run the command:
 ```sh
     python deepzoom_server_COMET.py "data\06-18270_5_A1MLH1_1.tif" "data\06-18270_5_A1MSH2_1.tif" "data\transform_matrix.npy"
 ```
